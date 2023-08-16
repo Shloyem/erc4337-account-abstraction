@@ -27,7 +27,7 @@ forge script script/DeployKernel.s.sol:DeployKernel --rpc-url https://rpc.fusesp
 		- import "@nomiclabs/hardhat-etherscan";
 
 		- In networks section:
-
+		```
 			fusespark: {
 			  accounts: getAccounts(),
 			  url: "https://rpc.fusespark.io/",
@@ -50,9 +50,9 @@ forge script script/DeployKernel.s.sol:DeployKernel --rpc-url https://rpc.fusesp
 				}
 			  }
 			]
-
+		```
           2.DeployKernel.ts:
-
+		```
         import "@nomiclabs/hardhat-etherscan";
         import hre, { ethers, network } from "hardhat";
 
@@ -81,13 +81,14 @@ forge script script/DeployKernel.s.sol:DeployKernel --rpc-url https://rpc.fusesp
         console.error(error);
         process.exitCode = 1;
         });
-
-        3. Run
+		```
+		
+        3. Run terminal command:
 
         ```
         npx hardhat run scripts/DeployKernel.ts --network fusespark
         ```
 
-3.  Use flatten by forge flatten or hardhat flatten or Remix IDE, and verify in the (FuseSpark explorer)[https://explorer.fusespark.io/] contract address.
+3.  Use flatten by forge flatten or hardhat flatten or Remix IDE, and verify in the [FuseSpark explorer](https://explorer.fusespark.io/) contract address.
 4.  Programatically use deprecated truffle-plugin-verify plugin.
-5.  Use sendVerifyRequestBlockscout function alike code from another Fuse tokenbridge-contracts repo (verifier.js)[https://github.com/fuseio/tokenbridge-contracts/blob/c1930e2913f83074cc239e31020d6e9331138629/deploy/src/utils/verifier.js#L59]
+5.  Use sendVerifyRequestBlockscout function alike code from another Fuse tokenbridge-contracts repo [verifier.js](https://github.com/fuseio/tokenbridge-contracts/blob/c1930e2913f83074cc239e31020d6e9331138629/deploy/src/utils/verifier.js#L59)
