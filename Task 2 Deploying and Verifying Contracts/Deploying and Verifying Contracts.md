@@ -57,24 +57,24 @@ forge script script/DeployKernel.s.sol:DeployKernel --rpc-url https://rpc.fusesp
         import hre, { ethers, network } from "hardhat";
 
         async function main() {
-        const ENTRY_POINT_ADDR = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789";
-        const KernelFactory = await ethers.getContractFactory("KernelFactory");
-        const kernelFactory = await KernelFactory.deploy(ENTRY_POINT_ADDR);
-        await kernelFactory.deployed();
-        console.log("\nKernelFactory deployed at", kernelFactory.address, "✅");
-
-        try {
-        console.log("\nKernelFactory contract Etherscan verification in progress...");
-        await kernelFactory.deployTransaction.wait(6);
-        await hre.run("verify:verify", {
-        address: kernelFactory.address,
-        constructorArguments: [ENTRY_POINT_ADDR],
-        contract: "src/factory/KernelFactory.sol:KernelFactory",
-        });
-        console.log("nKernelFactory Etherscan verification done. ✅");
-        } catch (error) {
-        console.error(error);
-        }
+	        const ENTRY_POINT_ADDR = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789";
+	        const KernelFactory = await ethers.getContractFactory("KernelFactory");
+	        const kernelFactory = await KernelFactory.deploy(ENTRY_POINT_ADDR);
+	        await kernelFactory.deployed();
+	        console.log("\nKernelFactory deployed at", kernelFactory.address, "✅");
+	
+	        try {
+		        console.log("\nKernelFactory contract Etherscan verification in progress...");
+		        await kernelFactory.deployTransaction.wait(6);
+		        await hre.run("verify:verify", {
+		        address: kernelFactory.address,
+		        constructorArguments: [ENTRY_POINT_ADDR],
+		        contract: "src/factory/KernelFactory.sol:KernelFactory",
+	        });
+	        console.log("nKernelFactory Etherscan verification done. ✅");
+	        } catch (error) {
+	        console.error(error);
+	        }
         }
 
         main().catch((error) => {
