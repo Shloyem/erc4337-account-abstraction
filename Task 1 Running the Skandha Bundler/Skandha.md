@@ -3,7 +3,7 @@ Optimal steps to run the Skandha Bundler on Fuse Spark network IMHO:
 1. Go to[Skandha bundler by Etherspot Github repo](https://github.com/etherspot/skandha), clone it and follow the steps.
 
 2. Edit the config to:
-```yaml
+```
 "networks": {
 	"fuseSparknet": {
 	      "entryPoints": [
