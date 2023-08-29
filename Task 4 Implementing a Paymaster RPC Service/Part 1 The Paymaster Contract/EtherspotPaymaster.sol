@@ -22,8 +22,8 @@ contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
     using UserOperationLib for UserOperation;
 
     uint256 private constant SPONSOR_ADDRESS_OFFSET = 20;
-    uint256 private constant VALID_TIMESTAMP_OFFSET = 40;
-    uint256 private constant SIGNATURE_OFFSET = 104;
+    //uint256 private constant VALID_TIMESTAMP_OFFSET = 52; // each abi.encode is 32bytes
+    uint256 private constant SIGNATURE_OFFSET = 116; // 20 + 1 * 32 + 2 * 32
     // calculated cost of the postOp
     uint256 private constant COST_OF_POST = 40000;
 
@@ -122,9 +122,9 @@ contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
     /**
      * verify our external signer signed this request.
      * the "paymasterAndData" is expected to be the paymaster and a signature over the entire request params
-     * paymasterAndData[:20] : address(this)
-     * paymasterAndData[20:84] : abi.encode(validUntil, validAfter)
-     * paymasterAndData[84:] : signature
+     * paymasterAndData[:20] 	:   address(this)
+     * paymasterAndData[20:116] : abi.encode(sponsorAddress, validUntil, validAfter)
+     * paymasterAndData[116:] 	: signature
      */
     function _validatePaymasterUserOp(
         UserOperation calldata userOp,
