@@ -7,7 +7,6 @@ pragma solidity ^0.8.12;
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./BasePaymaster.sol";
-import "./Whitelist.sol";
 
 /**
  * A sample paymaster that uses external service to decide whether to pay for the UserOp.
@@ -18,7 +17,7 @@ import "./Whitelist.sol";
  * - the paymaster signs to agree to PAY for GAS.
  * - the wallet signs to prove identity and account ownership.
  */
-contract EtherspotPaymaster is BasePaymaster, Whitelist, ReentrancyGuard {
+contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
     using ECDSA for bytes32;
     using UserOperationLib for UserOperation;
 
@@ -137,10 +136,11 @@ contract EtherspotPaymaster is BasePaymaster, Whitelist, ReentrancyGuard {
         // check for valid paymaster
         address sponsorSig = ECDSA.recover(hash, signature);
 
-        // don't revert on signature failure: return SIG_VALIDATION_FAILED
-        if (!_check(sponsorSig, sig)) {
-            return ("", _packValidationData(true, validUntil, validAfter));
-        }
+        // removing whitelisting logic + to be replaced with the new way to validate
+        // // don't revert on signature failure: return SIG_VALIDATION_FAILED
+        // if (!_check(sponsorSig, sig)) {
+        //     return ("", _packValidationData(true, validUntil, validAfter));
+        // }
 
         // check sponsor has enough funds deposited to pay for gas
         require(
