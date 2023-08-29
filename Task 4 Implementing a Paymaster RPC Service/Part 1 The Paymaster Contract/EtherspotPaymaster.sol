@@ -21,16 +21,30 @@ contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
     using ECDSA for bytes32;
     using UserOperationLib for UserOperation;
 
-    uint256 private constant VALID_TIMESTAMP_OFFSET = 20;
-    uint256 private constant SIGNATURE_OFFSET = 84;
+    uint256 private constant SPONSOR_ADDRESS_OFFSET = 20;
+    uint256 private constant VALID_TIMESTAMP_OFFSET = 40;
+    uint256 private constant SIGNATURE_OFFSET = 104;
     // calculated cost of the postOp
     uint256 private constant COST_OF_POST = 40000;
+
+    address private verifyingSignerAddress;
 
     mapping(address => uint256) private _sponsorBalances;
 
     event SponsorSuccessful(address paymaster, address sender);
 
-    constructor(IEntryPoint _entryPoint) BasePaymaster(_entryPoint) {}
+    constructor(
+        IEntryPoint _entryPoint,
+        address _verifyingSignerAddress
+    ) BasePaymaster(_entryPoint) {
+        verifyingSignerAddress = _verifyingSignerAddress;
+    }
+
+    function setVerifyingSigner(
+        address _newVerifyingSignerAddress
+    ) external onlyOwner {
+        verifyingSignerAddress = _newVerifyingSignerAddress;
+    }
 
     function depositFunds() external payable nonReentrant {
         _creditSponsor(msg.sender, msg.value);
@@ -86,6 +100,7 @@ contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
      */
     function getHash(
         UserOperation calldata userOp,
+        address sponsorAddress,
         uint48 validUntil,
         uint48 validAfter
     ) public view returns (bytes32) {
@@ -97,6 +112,7 @@ contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
                     _pack(userOp),
                     block.chainid,
                     address(this),
+                    sponsorAddress,
                     validUntil,
                     validAfter
                 )
@@ -118,6 +134,7 @@ contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
         (requiredPreFund);
 
         (
+            address sponsorAddress,
             uint48 validUntil,
             uint48 validAfter,
             bytes calldata signature
@@ -129,22 +146,19 @@ contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
             "EtherspotPaymaster:: invalid signature length in paymasterAndData"
         );
         bytes32 hash = ECDSA.toEthSignedMessageHash(
-            getHash(userOp, validUntil, validAfter)
+            getHash(userOp, sponsorAddress, validUntil, validAfter)
         );
         address sig = userOp.getSender();
 
-        // check for valid paymaster
-        address sponsorSig = ECDSA.recover(hash, signature);
-
-        // removing whitelisting logic + to be replaced with the new way to validate
-        // // don't revert on signature failure: return SIG_VALIDATION_FAILED
-        // if (!_check(sponsorSig, sig)) {
-        //     return ("", _packValidationData(true, validUntil, validAfter));
-        // }
+        // check signature is signed by the single verifying signer
+        // don't revert on signature failure: return SIG_VALIDATION_FAILED
+        if (verifyingSignerAddress != ECDSA.recover(hash, signature)) {
+            return ("", _packValidationData(true, validUntil, validAfter));
+        }
 
         // check sponsor has enough funds deposited to pay for gas
         require(
-            getSponsorBalance(sponsorSig) >= requiredPreFund,
+            getSponsorBalance(sponsorAddress) >= requiredPreFund,
             "EtherspotPaymaster:: Sponsor paymaster funds too low"
         );
 
@@ -152,12 +166,12 @@ contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
         uint256 totalPreFund = requiredPreFund + costOfPost;
 
         // debit requiredPreFund amount
-        _debitSponsor(sponsorSig, totalPreFund);
+        _debitSponsor(sponsorAddress, totalPreFund);
 
         // no need for other on-chain validation: entire UserOp should have been checked
         // by the external service prior to signing it.
         return (
-            abi.encode(sponsorSig, sig, totalPreFund, costOfPost),
+            abi.encode(sponsorAddress, sig, totalPreFund, costOfPost),
             _packValidationData(false, validUntil, validAfter)
         );
     }
@@ -167,11 +181,16 @@ contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
     )
         public
         pure
-        returns (uint48 validUntil, uint48 validAfter, bytes calldata signature)
+        returns (
+            address sponsorAddress,
+            uint48 validUntil,
+            uint48 validAfter,
+            bytes calldata signature
+        )
     {
-        (validUntil, validAfter) = abi.decode(
-            paymasterAndData[VALID_TIMESTAMP_OFFSET:SIGNATURE_OFFSET],
-            (uint48, uint48)
+        (sponsorAddress, validUntil, validAfter) = abi.decode(
+            paymasterAndData[SPONSOR_ADDRESS_OFFSET:SIGNATURE_OFFSET],
+            (address, uint48, uint48)
         );
         signature = paymasterAndData[SIGNATURE_OFFSET:];
     }
@@ -182,12 +201,12 @@ contract EtherspotPaymaster is BasePaymaster, ReentrancyGuard {
         uint256 actualGasCost
     ) internal override {
         (
-            address paymaster,
+            address sponsor,
             address sender,
             uint256 totalPrefund,
             uint256 costOfPost
         ) = abi.decode(context, (address, address, uint256, uint256));
-        _creditSponsor(paymaster, totalPrefund - (actualGasCost + costOfPost));
-        emit SponsorSuccessful(paymaster, sender);
+        _creditSponsor(sponsor, totalPrefund - (actualGasCost + costOfPost));
+        emit SponsorSuccessful(sponsor, sender);
     }
 }

@@ -11,7 +11,7 @@ But if the user op is transferring our super-valuable Carbonated Courage NFT, th
 Nonce: to prevent replay attacks.
 - Almost all wallets to use the signature field to receive some kind of signature over all the other fields to prevent unauthorized parties from forging or tampering with the op.
 - I would expect almost any wallet to reject an op with a nonce it has already seen.
-- We split into validate and executre because we wanted the wallet to:
+- We split into validate and execute because we wanted the wallet to:
 	* Not pay if not valid (a stranger can abuse this and make the wallet pay gas)
 	* Do pay if valid but operation failed - his fault.
 - Why doesn’t a dishonest wallet just do all its execution in validateOp, so that if the execution fails it won’t be charged for gas? 
@@ -26,6 +26,8 @@ validateOp will have significant restrictions that make it unsuitable for “rea
 The goal of these rules is to minimize cases where validateOp succeeds in simulation but fails in real execution.
 
 - Entry point can ask validateOp method for funds, and if validateOp doesn’t pay the requested amount - reject the op.
+- When writing a smart contract, it’s iffy to send ETH to an arbitrary contract so we won’t directly send the extra gas money back to the wallet.
+Instead, we’ll hold on to it and allow the wallet to get it out by making a call to withdraw it later. This is the pull-payment pattern.
 - Wallet’s gas payment can from two different places: 1) its ETH held by the entry point or 2) ETH that the wallet holds itself.
 - The entry point will try to pay for gas using the deposited ETH first, and then if there isn’t enough deposited it will ask for the remaining portion when calling the wallet’s validateOp.
 
@@ -34,6 +36,7 @@ maxPriorityFeePerGas represents a fee that the sender is willing to pay to have 
 The executor, when sending its transaction to call the entry point’s handleOp, can choose a lower maxPriorityFeePerGas and pocket the difference
 - Entry point is a singleton across the whole ecosystem
 
+- **There is a "No Separate EOA" Recap !**
 Bundling:
 - handleOps does:
 		* For each op, call validateOp on the op’s sender wallet. Any ops that fail validation we discarded.
