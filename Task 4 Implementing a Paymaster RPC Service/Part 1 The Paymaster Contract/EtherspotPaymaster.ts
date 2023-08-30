@@ -33,7 +33,8 @@ describe('EntryPoint with EtherspotPaymaster', function () {
   let account: EtherspotWallet;
   let wlaccount: EtherspotWallet;
   let offchainSigner: Wallet;
-  let offchainSigner1: Wallet;
+  let offchainSignerDifferent: Wallet;
+  let sponsorAccount: Wallet;
   let funder: any;
   let acc1: any;
   let acc2: any;
@@ -50,18 +51,20 @@ describe('EntryPoint with EtherspotPaymaster', function () {
   const MOCK_SIG = '0x1234';
 
   beforeEach(async () => {
-    [funder, acc1, acc2] = await ethers.getSigners();
+    [funder] = await ethers.getSigners();
 
     this.timeout(20000);
     entryPoint = await deployEntryPoint();
 
     offchainSigner = createAccountOwner();
-    offchainSigner1 = createAccountOwner();
+    sponsorAccount = createAccountOwner();
     accountOwner = createAccountOwner();
     wlaccOwner = createAccountOwner();
 
+
     paymaster = await new EtherspotPaymaster__factory(ethersSigner).deploy(
-      entryPoint.address
+      entryPoint.address,
+      offchainSigner.address
     );
 
     await paymaster.addStake(1, { value: parseEther('3') });
@@ -77,15 +80,13 @@ describe('EntryPoint with EtherspotPaymaster', function () {
       entryPoint.address
     ));
 
-    // await fund(offchainSigner.address, '5.0');
-    // await fund(offchainSigner1.address, '5.0');
 
     await funder.sendTransaction({
       to: offchainSigner.address,
       value: ethers.utils.parseEther('20.0'),
     });
     await funder.sendTransaction({
-      to: offchainSigner1.address,
+      to: sponsorAccount.address,
       value: ethers.utils.parseEther('20.0'),
     });
   });
@@ -95,12 +96,14 @@ describe('EntryPoint with EtherspotPaymaster', function () {
       const paymasterAndData = hexConcat([
         paymaster.address,
         defaultAbiCoder.encode(
-          ['uint48', 'uint48'],
-          [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
+          ['address', 'uint48', 'uint48'],
+          [offchainSigner.address, MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
         ),
         MOCK_SIG,
       ]);
       const res = await paymaster.parsePaymasterAndData(paymasterAndData);
+
+      expect(res.sponsorAddress).to.be.equal(offchainSigner.address);
       expect(res.validUntil).to.be.equal(
         ethers.BigNumber.from(MOCK_VALID_UNTIL)
       );
@@ -111,14 +114,6 @@ describe('EntryPoint with EtherspotPaymaster', function () {
     });
   });
 
-  describe('whitelist integration check', () => {
-    it('should be able to interact with whitelist', async () => {
-      await paymaster.connect(acc1).addToWhitelist(acc2.address);
-      expect(await paymaster.check(acc1.address, acc2.address)).to.be.true;
-      await paymaster.connect(acc1).removeFromWhitelist(acc2.address);
-      expect(await paymaster.check(acc1.address, acc2.address)).to.be.false;
-    });
-  });
 
   describe('#validatePaymasterUserOp', () => {
     it('should reject on no signature', async () => {
@@ -128,8 +123,8 @@ describe('EntryPoint with EtherspotPaymaster', function () {
           paymasterAndData: hexConcat([
             paymaster.address,
             defaultAbiCoder.encode(
-              ['uint48', 'uint48'],
-              [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
+              ['address', 'uint48', 'uint48'],
+              [offchainSigner.address, MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
             ),
             '0x1234',
           ]),
@@ -155,8 +150,8 @@ describe('EntryPoint with EtherspotPaymaster', function () {
           paymasterAndData: hexConcat([
             paymaster.address,
             defaultAbiCoder.encode(
-              ['uint48', 'uint48'],
-              [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
+              ['address', 'uint48', 'uint48'],
+              [offchainSigner.address, MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
             ),
             '0x' + '00'.repeat(65),
           ]),
@@ -184,8 +179,8 @@ describe('EntryPoint with EtherspotPaymaster', function () {
             paymasterAndData: hexConcat([
               paymaster.address,
               defaultAbiCoder.encode(
-                ['uint48', 'uint48'],
-                [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
+                ['address', 'uint48', 'uint48'],
+                [offchainSigner.address, MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
               ),
               sig,
             ]),
@@ -211,10 +206,77 @@ describe('EntryPoint with EtherspotPaymaster', function () {
       });
     });
 
-    it('succeed with valid signature', async () => {
-      await paymaster.connect(offchainSigner).addToWhitelist(account.address);
+    it('succeed with a valid signature', async () => {
+      // Deposit funds for gas.
       await paymaster
-        .connect(offchainSigner)
+        .connect(sponsorAccount)
+        .depositFunds({ value: ethers.utils.parseEther('2.0') });
+
+      // Made by user/wallet --> and sent to offchain signer
+      // This is like the account (user) sends the off-chain service, not signed yet
+      const userOp1 = await fillAndSign(
+        {
+          sender: account.address,
+          paymasterAndData: hexConcat([
+            paymaster.address,
+            defaultAbiCoder.encode(
+              ['address', 'uint48', 'uint48'],
+              [sponsorAccount.address, MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
+            ),
+            '0x' + '00'.repeat(65),
+          ]),
+          verificationGasLimit: 120000,
+        },
+        accountOwner,
+        entryPoint
+      );
+
+      // Called By offChainService.
+      // this method is called by the off-chain service, to sign the request.
+      const hash = await paymaster.getHash(
+        userOp1,
+        sponsorAccount.address,
+        MOCK_VALID_UNTIL,
+        MOCK_VALID_AFTER
+      );
+
+      // Offchain signer signs the hash from getHash
+      const sig = await offchainSigner.signMessage(arrayify(hash));
+
+      // UserOp with OffchainSigner signature
+      const userOp = await fillAndSign(
+        {
+          ...userOp1,
+          paymasterAndData: hexConcat([
+            paymaster.address,
+            defaultAbiCoder.encode(
+              ['address', 'uint48', 'uint48'],
+              [sponsorAccount.address, MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
+            ),
+            sig, // added from before
+          ]),
+        },
+        accountOwner,
+        entryPoint
+      );
+
+      // Run simulation
+      const res = await entryPoint.callStatic
+        .simulateValidation(userOp)
+        .catch(simulationResultCatch);
+
+      expect(res.returnInfo.sigFailed).to.be.false;
+      expect(res.returnInfo.validAfter).to.be.equal(
+        ethers.BigNumber.from(MOCK_VALID_AFTER)
+      );
+      expect(res.returnInfo.validUntil).to.be.equal(
+        ethers.BigNumber.from(MOCK_VALID_UNTIL)
+      );
+    });
+
+    it('fail on signed by not the single verifying signer', async () => {
+      await paymaster
+        .connect(sponsorAccount)
         .depositFunds({ value: ethers.utils.parseEther('2.0') });
 
       const userOp1 = await fillAndSign(
@@ -223,8 +285,8 @@ describe('EntryPoint with EtherspotPaymaster', function () {
           paymasterAndData: hexConcat([
             paymaster.address,
             defaultAbiCoder.encode(
-              ['uint48', 'uint48'],
-              [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
+              ['address', 'uint48', 'uint48'],
+              [sponsorAccount.address, MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
             ),
             '0x' + '00'.repeat(65),
           ]),
@@ -236,6 +298,63 @@ describe('EntryPoint with EtherspotPaymaster', function () {
 
       const hash = await paymaster.getHash(
         userOp1,
+        sponsorAccount.address,
+        MOCK_VALID_UNTIL,
+        MOCK_VALID_AFTER
+      );
+
+      // signed by offchainSignerDifferent and not offchainSigner !
+      const sig = await offchainSignerDifferent.signMessage(arrayify(hash));
+
+      const userOp = await fillAndSign(
+        {
+          ...userOp1,
+          paymasterAndData: hexConcat([
+            paymaster.address,
+            defaultAbiCoder.encode(
+              ['address', 'uint48', 'uint48'],
+              [sponsorAccount.address, MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
+            ),
+            sig,
+          ]),
+        },
+        accountOwner,
+        entryPoint
+      );
+
+      const res = await entryPoint.callStatic
+        .simulateValidation(userOp)
+        .catch(simulationResultCatch);
+
+      expect(res.returnInfo.sigFailed).to.be.true;
+    });
+
+    it('error thrown if sponsor balance too low', async () => {
+      // No deposit by sponsor account
+      // await paymaster
+      //   .connect(sponsorAccount)
+      //   .depositFunds({ value: ethers.utils.parseEther('2.0') });
+
+      const userOp1 = await fillAndSign(
+        {
+          sender: account.address,
+          paymasterAndData: hexConcat([
+            paymaster.address,
+            defaultAbiCoder.encode(
+              ['address', 'uint48', 'uint48'],
+              [sponsorAccount.address, MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
+            ),
+            '0x' + '00'.repeat(65),
+          ]),
+          verificationGasLimit: 120000,
+        },
+        accountOwner,
+        entryPoint
+      );
+
+      const hash = await paymaster.getHash(
+        userOp1,
+        sponsorAccount.address,
         MOCK_VALID_UNTIL,
         MOCK_VALID_AFTER
       );
@@ -248,180 +367,13 @@ describe('EntryPoint with EtherspotPaymaster', function () {
           paymasterAndData: hexConcat([
             paymaster.address,
             defaultAbiCoder.encode(
-              ['uint48', 'uint48'],
-              [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
+              ['address', 'uint48', 'uint48'],
+              [sponsorAccount.address, MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
             ),
             sig,
           ]),
         },
         accountOwner,
-        entryPoint
-      );
-
-      const res = await entryPoint.callStatic
-        .simulateValidation(userOp)
-        .catch(simulationResultCatch);
-      expect(res.returnInfo.sigFailed).to.be.false;
-      expect(res.returnInfo.validAfter).to.be.equal(
-        ethers.BigNumber.from(MOCK_VALID_AFTER)
-      );
-      expect(res.returnInfo.validUntil).to.be.equal(
-        ethers.BigNumber.from(MOCK_VALID_UNTIL)
-      );
-    });
-
-    it('should reject if not a whitelisted signature', async () => {
-      const userOp2 = await fillAndSign(
-        {
-          sender: account.address,
-          paymasterAndData: hexConcat([
-            paymaster.address,
-            defaultAbiCoder.encode(
-              ['uint48', 'uint48'],
-              [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
-            ),
-            '0x' + '00'.repeat(65),
-          ]),
-          verificationGasLimit: 120000,
-        },
-        accountOwner,
-        entryPoint
-      );
-
-      const hash = await paymaster.getHash(
-        userOp2,
-        MOCK_VALID_UNTIL,
-        MOCK_VALID_AFTER
-      );
-      const sig = await offchainSigner.signMessage(arrayify(hash));
-
-      const userOp = await fillAndSign(
-        {
-          ...userOp2,
-          paymasterAndData: hexConcat([
-            paymaster.address,
-            defaultAbiCoder.encode(
-              ['uint48', 'uint48'],
-              [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
-            ),
-            sig,
-          ]),
-        },
-        accountOwner,
-        entryPoint
-      );
-
-      const ret = await entryPoint.callStatic
-        .simulateValidation(userOp)
-        .catch(simulationResultCatch);
-
-      expect(ret.returnInfo.sigFailed).to.be.true;
-    });
-
-    it('succeeds if whitelisted signature', async () => {
-      await paymaster
-        .connect(offchainSigner)
-        .depositFunds({ value: ethers.utils.parseEther('2.0') });
-
-      // offchain signer add itself as sponsor for wlaccount
-      await paymaster.connect(offchainSigner).addToWhitelist(wlaccount.address);
-      // check added correctly
-      const check = await paymaster.check(
-        offchainSigner.address,
-        wlaccount.address
-      );
-
-      const userOp2 = await fillAndSign(
-        {
-          sender: wlaccount.address,
-          paymasterAndData: hexConcat([
-            paymaster.address,
-            defaultAbiCoder.encode(
-              ['uint48', 'uint48'],
-              [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
-            ),
-            '0x' + '00'.repeat(65),
-          ]),
-          verificationGasLimit: 120000,
-        },
-        wlaccOwner,
-        entryPoint
-      );
-
-      const hash = await paymaster.getHash(
-        userOp2,
-        MOCK_VALID_UNTIL,
-        MOCK_VALID_AFTER
-      );
-      const sig = await offchainSigner.signMessage(arrayify(hash));
-
-      const userOp = await fillAndSign(
-        {
-          ...userOp2,
-          paymasterAndData: hexConcat([
-            paymaster.address,
-            defaultAbiCoder.encode(
-              ['uint48', 'uint48'],
-              [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
-            ),
-            sig,
-          ]),
-        },
-        wlaccOwner,
-        entryPoint
-      );
-
-      const ret = await entryPoint.callStatic
-        .simulateValidation(userOp)
-        .catch(simulationResultCatch);
-      expect(ret.returnInfo.sigFailed).to.be.false;
-    });
-
-    it('error thrown if sponsor balance too low', async () => {
-      await paymaster
-        .connect(offchainSigner)
-        .depositFunds({ value: ethers.utils.parseEther('2.0') });
-      await paymaster
-        .connect(offchainSigner1)
-        .addToWhitelist(wlaccount.address);
-      const userOp2 = await fillAndSign(
-        {
-          sender: wlaccount.address,
-          paymasterAndData: hexConcat([
-            paymaster.address,
-            defaultAbiCoder.encode(
-              ['uint48', 'uint48'],
-              [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
-            ),
-            '0x' + '00'.repeat(65),
-          ]),
-          verificationGasLimit: 120000,
-        },
-        wlaccOwner,
-        entryPoint
-      );
-
-      const hash = await paymaster.getHash(
-        userOp2,
-        MOCK_VALID_UNTIL,
-        MOCK_VALID_AFTER
-      );
-
-      const sig = await offchainSigner1.signMessage(arrayify(hash));
-
-      const userOp = await fillAndSign(
-        {
-          ...userOp2,
-          paymasterAndData: hexConcat([
-            paymaster.address,
-            defaultAbiCoder.encode(
-              ['uint48', 'uint48'],
-              [MOCK_VALID_UNTIL, MOCK_VALID_AFTER]
-            ),
-            sig,
-          ]),
-        },
-        wlaccOwner,
         entryPoint
       );
 
@@ -435,102 +387,3 @@ describe('EntryPoint with EtherspotPaymaster', function () {
       );
     });
   });
-
-  describe('#depositFunds', () => {
-    it('should succeed in depositing funds', async () => {
-      const init = await paymaster.getSponsorBalance(offchainSigner.address);
-      expect(init).to.equal(0);
-      await expect(() =>
-        paymaster
-          .connect(offchainSigner)
-          .depositFunds({ value: ethers.utils.parseEther('2.0') })
-      ).to.changeEtherBalance(offchainSigner, ethers.utils.parseEther('-2.0'));
-      const post = await paymaster.getSponsorBalance(offchainSigner.address);
-      expect(post).to.equal(ethers.utils.parseEther('2.0'));
-    });
-  });
-
-  describe('#withdrawFunds', () => {
-    it('should succeed in withdrawing funds', async () => {
-      const init = await paymaster.getSponsorBalance(offchainSigner.address);
-      expect(init).to.equal(0);
-      await paymaster
-        .connect(offchainSigner)
-        .depositFunds({ value: ethers.utils.parseEther('2.0') });
-      const pre = await paymaster.getSponsorBalance(offchainSigner.address);
-      expect(pre).to.equal(ethers.utils.parseEther('2.0'));
-      await expect(() =>
-        paymaster
-          .connect(offchainSigner)
-          .withdrawFunds(ethers.utils.parseEther('1.0'))
-      ).to.changeEtherBalance(offchainSigner, ethers.utils.parseEther('1.0'));
-      const post = await paymaster.getSponsorBalance(offchainSigner.address);
-      expect(post).to.equal(ethers.utils.parseEther('1.0'));
-    });
-
-    it('should throw error when amount is greater than sponsor deposited balance', async () => {
-      await paymaster
-        .connect(offchainSigner)
-        .withdrawFunds(ethers.utils.parseEther('1.0'))
-        .catch((e) => {
-          const error = errorParse(e.toString());
-          expect(error).to.equal(
-            'EtherspotPaymaster:: not enough deposited funds'
-          );
-        });
-    });
-  });
-
-  describe('#_postOp', async () => {
-    beforeEach(async () => {
-      // deploy internal paymaster test contract
-      const Intpaymaster = await ethers.getContractFactory(
-        '$EtherspotPaymaster'
-      );
-      intpaymaster = await Intpaymaster.deploy(entryPoint.address);
-      // deposit funds and check ok deposit
-      await intpaymaster
-        .connect(offchainSigner)
-        .depositFunds({ value: ethers.utils.parseEther('2.0') });
-    });
-
-    it('should credit remaining prefund after gas', async () => {
-      const init = await intpaymaster.getSponsorBalance(offchainSigner.address);
-      expect(init).to.equal(ethers.utils.parseEther('2'));
-
-      const reqPreFund = ethers.utils.parseEther('0.1');
-      const costOfPost = ethers.utils.parseEther('0.0000000000012');
-      const totalGasConsumed = GAS_COST.add(costOfPost);
-      const diff = reqPreFund.sub(totalGasConsumed);
-
-      const context = defaultAbiCoder.encode(
-        ['address', 'address', 'uint256', 'uint256'],
-        [offchainSigner.address, account.address, reqPreFund, costOfPost]
-      );
-
-      // call _postOp
-      await intpaymaster
-        .connect(offchainSigner)
-        .$_postOp(SUCCESS_OP, context, GAS_COST);
-      const post = await intpaymaster.getSponsorBalance(offchainSigner.address);
-      expect(post).to.equal(init.add(diff));
-    });
-
-    it('should emit success event upon deducting sponsor funds', async () => {
-      const reqPreFund = ethers.utils.parseEther('0.1');
-      const costOfPost = ethers.utils.parseEther('0.0000000000012');
-
-      const context = defaultAbiCoder.encode(
-        ['address', 'address', 'uint256', 'uint256'],
-        [offchainSigner.address, account.address, reqPreFund, costOfPost]
-      );
-      await expect(
-        intpaymaster
-          .connect(offchainSigner)
-          .$_postOp(SUCCESS_OP, context, GAS_COST)
-      )
-        .to.emit(intpaymaster, 'SponsorSuccessful')
-        .withArgs(offchainSigner.address, account.address);
-    });
-  });
-});
