@@ -1,6 +1,21 @@
 # erc4337-account-abstraction
 An assignment based on the ERC-4337 standard for Account Abstraction.
 
+## ** Addition
+While solving this task, it was fun and satisfying to find a bug that was correct.  
+I commented on the [Etherspot paymaster contract commit (line146)](https://github.com/etherspot/etherspot-prime-contracts/commit/d2436775bf9886ec82a7389a005f37911193ae68#diff-963e97cb51ce48ba7288b63b2d68e85c94f966a351428009226aab6ecfaa5bf9) and asked the creator if there is a bug: 
+
+
+![Screenshot of bug description](bug_desc.png)
+
+
+### **And indeed he fixed it in this [last commit](https://github.com/etherspot/etherspot-prime-contracts/commit/8f548ca9fc28109706a2bb938207315c8db3af67) :)**
+
+
+![Screenshot of bug solved](bug_solved.png)
+
+
+
 # Full Stack Web3 Engineer Challenge
 
 ## Introduction
